@@ -36,10 +36,8 @@ integer _httpErrors = 0;
 // Enable cue if not yet active
 enableCue() {
 	if(!_cueActive) {
-		llSetTimerEvent(0.85);
 		_cueActive = TRUE;
-		// Also check it right away, instead of waiting for the first timer tick to fire
-		webdb_cue_check();
+		webdb_cue_schedulecheck();
 	}
 }
 
@@ -53,6 +51,16 @@ webdb_cue_add(string type, string scriptkey, string recordkey, string value) {
 	}
 }
 
+// Schedule the next cue check
+webdb_cue_schedulecheck() {
+	float delay = 0.85 - llGetTime();
+	if(delay <= 0.0) {
+		webdb_cue_check();
+	} else {
+		llSetTimerEvent(delay);
+	}
+}
+
 // Execute pending requests and stop cue timer when none pending
 webdb_cue_check() {
 	integer len = llGetListLength(_httpCue);
@@ -62,6 +70,9 @@ webdb_cue_check() {
 		if(request == NULL_KEY) { 
 			// Null key, meaning request pending
 			webdb_execute(i);
+			// In case the http_response ever gets lost, this will make sure the cue
+			// is checked again in the future
+			llSetTimerEvent(300.0);
 			return;
 		}
 		i += 5; // Next request key is 4 items further in list
@@ -90,7 +101,7 @@ default {
 		integer index = llListFindList(_httpCue, [request_id]); // Check if request originates from this script
 		if(index != -1) {
 			// Normal http response codes
-			if(status == 200 || status == 201 || status == 404) {
+			if(llListFindList([200, 201, 404], [status]) != -1) { 
 				string type = llList2String(_httpCue, index+1);
 				string scriptkey = llList2String(_httpCue, index+2);
 				string recordkey = llList2String(_httpCue, index+3);
@@ -99,8 +110,6 @@ default {
 				if(_httpErrors > 0) {
 					llOwnerSay("webdb connection re-established");
 					_httpErrors = 0;
-					// Force cue timer back to normal rate
-					llSetTimerEvent(0.85);
 					_cueActive = TRUE;
 				}
 
@@ -110,7 +119,7 @@ default {
 
 			// Http responses indicating likely temporary errors (network timeout,
 			// dns lookup failure, etc) which may be tried again
-			} else if(status == 499 || status == 500 || status == 503 || status == 504) {
+			} else if(llListFindList([0, 499, 500, 503, 504], [status]) != -1) { 
 				// Reset request key to have it picked up from the cue again
 				// on the next cue tick
 				_httpCue = llListReplaceList(_httpCue, [NULL_KEY], index, index);
@@ -129,6 +138,7 @@ default {
 				// Back off from making new requests for a bit
 				llSetTimerEvent((float) (_httpErrors*60));
 				_cueActive = TRUE;
+				return;
 			} else if(status == 301) {
 				// In case of the configured instance of webdb moving,
 				// 301 is expected to be returned for all requests, along with
@@ -144,14 +154,13 @@ default {
 				if(_httpErrors > 0) {
 					llOwnerSay("webdb connection re-established");
 					_httpErrors = 0;
-					// Force cue timer back to normal rate
-					llSetTimerEvent(0.85);
 					_cueActive = TRUE;
 				}
 
 				// Request handled, remove from cue
 				_httpCue = llDeleteSubList(_httpCue, index, index+4);
 			}
+			webdb_cue_schedulecheck();
 		}
 	}
 
