@@ -90,6 +90,7 @@ webdb_execute(integer index) {
 	string value = llList2String(_httpCue, index+4);
 	
 	key request = llHTTPRequest(llDumpList2String([WEBDB_URL, scriptkey, "/", recordkey], ""), [HTTP_METHOD, method], value);
+	llResetTime();
 	_httpCue = llListReplaceList(_httpCue, [request], index, index); 
 }
 
